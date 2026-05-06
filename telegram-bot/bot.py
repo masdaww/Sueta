@@ -1,12 +1,15 @@
 """
-Telegram-бот с ИИ (Pollinations AI).
+Telegram-бот с ИИ (Gemini + Pollinations fallback).
 
-Бесплатный AI-провайдер без API-ключей.
-Использует OpenAI-compatible endpoint Pollinations: https://text.pollinations.ai/openai
+Основной провайдер: Google Gemini API (быстрее и стабильнее).
+Резервный провайдер: Pollinations AI без API-ключей.
 
 Переменные окружения:
     TELEGRAM_BOT_TOKEN  — токен бота от @BotFather
-    AI_MODEL            — модель (по умолчанию openai-fast)
+    GEMINI_API_KEY      — ключ Google Gemini API
+    GEMINI_MODEL        — модель Gemini (по умолчанию gemini-2.5-flash)
+    GEMINI_FALLBACK_MODELS — резервные модели Gemini через запятую
+    AI_MODEL            — Pollinations fallback модель (по умолчанию openai-fast)
     SYSTEM_PROMPT       — системный промпт для ИИ (опционально)
 """
 
@@ -18,6 +21,8 @@ from pathlib import Path
 
 import requests
 from dotenv import load_dotenv
+from google import genai
+from google.genai import types
 from telegram import Update
 from telegram.ext import (
     Application,
@@ -31,6 +36,12 @@ env_path = Path(__file__).resolve().parent / ".env"
 load_dotenv(dotenv_path=env_path)
 
 TELEGRAM_BOT_TOKEN: str = os.environ["TELEGRAM_BOT_TOKEN"]
+GEMINI_API_KEY: str | None = os.getenv("GEMINI_API_KEY")
+GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+GEMINI_FALLBACK_MODELS: str = os.getenv(
+    "GEMINI_FALLBACK_MODELS",
+    "gemini-2.5-flash-lite,gemini-flash-latest",
+)
 AI_MODEL: str = os.getenv("AI_MODEL", "openai-fast")
 AI_FALLBACK_MODEL: str = os.getenv("AI_FALLBACK_MODEL", "openai")
 SYSTEM_PROMPT: str = os.getenv(
@@ -39,6 +50,7 @@ SYSTEM_PROMPT: str = os.getenv(
 )
 AI_API_URL = "https://text.pollinations.ai/openai"
 HTTP_SESSION = requests.Session()
+GEMINI_CLIENT = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
 # ─── Логирование ─────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -50,23 +62,62 @@ logger = logging.getLogger(__name__)
 # Хранилище контекста диалогов: chat_id → list[dict]
 chat_histories: dict[int, list[dict[str, str]]] = {}
 MAX_HISTORY = 4
-
-
-def ai_models() -> list[str]:
-    """Список моделей для попыток запроса."""
+disabled_gemini_models: dict[str, float] = {}
+def pollinations_models() -> list[str]:
+    """Список Pollinations-моделей для попыток запроса."""
     models = [AI_MODEL]
     if AI_FALLBACK_MODEL and AI_FALLBACK_MODEL not in models:
         models.append(AI_FALLBACK_MODEL)
     return models
 
 
-def ask_ai(messages: list[dict[str, str]]) -> str:
-    """Запрос к бесплатному AI API."""
+def gemini_models() -> list[str]:
+    """Список Gemini-моделей для попыток запроса."""
+    now = time.monotonic()
+    models = [GEMINI_MODEL]
+    for model in GEMINI_FALLBACK_MODELS.split(","):
+        model = model.strip()
+        if model and model not in models:
+            models.append(model)
+    return [
+        model
+        for model in models
+        if disabled_gemini_models.get(model, 0.0) <= now
+    ]
+
+
+def ask_gemini(messages: list[dict[str, str]], model: str) -> str:
+    """Запрос к Gemini API."""
+    if GEMINI_CLIENT is None:
+        raise RuntimeError("GEMINI_API_KEY is not configured")
+
+    contents = [
+        types.Content(
+            role="model" if message["role"] == "assistant" else "user",
+            parts=[types.Part(text=message["content"])],
+        )
+        for message in messages
+        if message["role"] in {"user", "assistant"}
+    ]
+    response = GEMINI_CLIENT.models.generate_content(
+        model=model,
+        contents=contents,
+        config=types.GenerateContentConfig(
+            system_instruction=SYSTEM_PROMPT,
+            temperature=0.7,
+            max_output_tokens=384,
+        ),
+    )
+    return response.text.strip()
+
+
+def ask_pollinations(messages: list[dict[str, str]]) -> str:
+    """Запрос к бесплатному Pollinations API."""
     started_at = time.monotonic()
     last_error: Exception | None = None
 
-    for model in ai_models():
-        for attempt in range(3):
+    for model in pollinations_models():
+        for attempt in range(2):
             try:
                 response = HTTP_SESSION.post(
                     AI_API_URL,
@@ -83,7 +134,7 @@ def ask_ai(messages: list[dict[str, str]]) -> str:
                         "Content-Type": "application/json",
                         "User-Agent": "telegram-ai-bot",
                     },
-                    timeout=45,
+                    timeout=12,
                 )
                 response.raise_for_status()
                 data = response.json()
@@ -97,7 +148,7 @@ def ask_ai(messages: list[dict[str, str]]) -> str:
                 last_error = error
                 status_code = getattr(error.response, "status_code", None)
                 logger.warning(
-                    "AI request failed via %s (attempt %s/3, status=%s): %s",
+                    "AI request failed via %s (attempt %s/2, status=%s): %s",
                     model,
                     attempt + 1,
                     status_code,
@@ -105,9 +156,30 @@ def ask_ai(messages: list[dict[str, str]]) -> str:
                 )
                 if status_code and status_code < 500 and status_code != 429:
                     break
-                time.sleep(1 + attempt * 2)
+                time.sleep(0.5 + attempt)
 
     raise RuntimeError("AI provider is temporarily unavailable") from last_error
+
+
+def ask_ai(messages: list[dict[str, str]]) -> str:
+    """Запрос к Gemini с fallback на Pollinations."""
+    started_at = time.monotonic()
+
+    if GEMINI_CLIENT is not None:
+        for model in gemini_models():
+            try:
+                reply = ask_gemini(messages, model)
+                logger.info(
+                    "AI response received in %.2fs via %s",
+                    time.monotonic() - started_at,
+                    model,
+                )
+                return reply
+            except Exception as error:
+                logger.warning("Gemini request failed via %s: %s", model, error)
+                disabled_gemini_models[model] = time.monotonic() + 60
+
+    return ask_pollinations(messages)
 
 
 # ─── Обработчики ─────────────────────────────────────────────────────────────
@@ -162,8 +234,8 @@ async def handle_message(update: Update, _) -> None:
         logger.exception("Ошибка при обращении к AI")
         history.pop()
         reply = (
-            "Бесплатная нейросеть сейчас перегружена и не ответила после нескольких "
-            "попыток. Напиши ещё раз через 10–20 секунд."
+            "Нейросеть сейчас перегружена и не ответила после нескольких "
+            "быстрых попыток. Напиши ещё раз через 10–20 секунд."
         )
     else:
         history.append({"role": "assistant", "content": reply})
@@ -182,7 +254,7 @@ def main() -> None:
     app.add_handler(CommandHandler("reset", reset))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    logger.info("Бот запущен (модель: %s). Ожидание сообщений…", AI_MODEL)
+    logger.info("Бот запущен (Gemini: %s). Ожидание сообщений…", GEMINI_MODEL)
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 

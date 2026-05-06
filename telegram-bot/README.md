@@ -1,6 +1,6 @@
 # 🤖 Telegram-бот с ИИ
 
-Простой Telegram-бот с нейросетью. **Бесплатно, без API-ключей для ИИ.** Использует Pollinations AI — OpenAI-compatible endpoint `https://text.pollinations.ai/openai`.
+Простой Telegram-бот с нейросетью. Основной провайдер — **Google Gemini API** (быстро и есть бесплатный тариф). Если Gemini временно недоступен, бот переключается на бесплатный no-key fallback **Pollinations AI**.
 
 ## Возможности
 
@@ -9,14 +9,17 @@
   - `/start` — приветствие
   - `/help` — справка
   - `/reset` — сбросить контекст диалога
-- **Бесплатный AI-провайдер** — не нужен OpenAI/Gemini API key
+- **Gemini как основной быстрый провайдер**
+- **Pollinations fallback** без API-ключей
+- **Retry и fallback** при временных сбоях AI-провайдера
 - **Настраиваемый системный промпт**
 
 ## Быстрый старт
 
-### 1. Получить токен бота
+### 1. Получить токены
 
-Создай бота у [@BotFather](https://t.me/BotFather) в Telegram и скопируй токен.
+1. Создай бота у [@BotFather](https://t.me/BotFather) в Telegram и скопируй токен.
+2. Получи бесплатный Gemini API key: [aistudio.google.com/apikey](https://aistudio.google.com/apikey).
 
 ### 2. Настроить окружение
 
@@ -25,10 +28,11 @@ cd telegram-bot
 cp .env.example .env
 ```
 
-Заполни `.env` токеном бота:
+Заполни `.env`:
 
 ```
 TELEGRAM_BOT_TOKEN=123456:ABC-DEF...
+GEMINI_API_KEY=AIza...
 ```
 
 ### 3. Установить зависимости
@@ -52,19 +56,17 @@ python bot.py
 | Переменная           | Обязательная | Описание                                           |
 |----------------------|:------------:|----------------------------------------------------|
 | `TELEGRAM_BOT_TOKEN` | ✓            | Токен бота от @BotFather                           |
-| `AI_MODEL`           |              | Модель (по умолчанию `openai-fast`)                     |
+| `GEMINI_API_KEY`     |              | Gemini API key; если нет, используется fallback    |
+| `GEMINI_MODEL`       |              | Gemini модель (по умолчанию `gemini-2.5-flash`)    |
+| `GEMINI_FALLBACK_MODELS` |          | Gemini fallback-модели через запятую               |
+| `AI_MODEL`           |              | Pollinations fallback (`openai-fast`)              |
+| `AI_FALLBACK_MODEL`  |              | Резервная Pollinations модель (`openai`)           |
 | `SYSTEM_PROMPT`      |              | Системный промпт для настройки «характера» бота    |
 
-## Провайдер ИИ
+## Провайдеры ИИ
 
-По умолчанию бот использует Pollinations AI без ключей:
-
-- Endpoint: `https://text.pollinations.ai/openai`
-- Основная модель: `openai-fast` (более быстрый бесплатный вариант)
-- Резервная модель: `openai`
-- При временных ошибках 5xx бот делает несколько повторных попыток
-
-Это не официальный OpenAI API и стабильность/доступность зависит от Pollinations.
+1. **Google Gemini** — основной провайдер, быстрее и стабильнее. Бот пробует несколько Gemini-моделей подряд.
+2. **Pollinations AI** — fallback без API-ключей, используется при сбое Gemini или если `GEMINI_API_KEY` не задан.
 
 ## Структура
 
