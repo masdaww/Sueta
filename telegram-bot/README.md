@@ -51,6 +51,59 @@ python bot.py
 
 Бот начнёт слушать сообщения. Напиши ему в Telegram — и получишь ответ от ИИ.
 
+## Бесплатный запуск 24/7
+
+Для постоянной работы нужен сервер, который всегда включён. Из бесплатных вариантов самый надёжный — **Oracle Cloud Always Free VPS**:
+
+- сайт: https://www.oracle.com/cloud/free/
+- тип сервера: Ubuntu, Ampere A1 / Always Free
+- минус: при регистрации обычно нужна банковская карта для проверки
+
+### Запуск через Docker на VPS
+
+1. Установи Docker:
+
+```bash
+sudo apt update
+sudo apt install -y docker.io docker-compose-plugin
+sudo systemctl enable --now docker
+```
+
+2. Скопируй проект на сервер и перейди в папку бота:
+
+```bash
+cd telegram-bot
+cp .env.example .env
+nano .env
+```
+
+3. Заполни `.env`:
+
+```env
+TELEGRAM_BOT_TOKEN=123456:ABC-DEF...
+GEMINI_API_KEY=AIza...
+```
+
+4. Запусти бота:
+
+```bash
+sudo docker compose up -d --build
+```
+
+5. Посмотреть логи:
+
+```bash
+sudo docker compose logs -f
+```
+
+6. Остановить:
+
+```bash
+sudo docker compose down
+```
+
+`restart: unless-stopped` в `docker-compose.yml` автоматически перезапустит бота после сбоя или перезагрузки VPS.
+
 ## Переменные окружения
 
 | Переменная           | Обязательная | Описание                                           |
@@ -72,7 +125,9 @@ python bot.py
 
 ```
 telegram-bot/
+├── Dockerfile          # Docker-образ для деплоя
 ├── bot.py              # Основной код бота
+├── docker-compose.yml  # Запуск 24/7 через Docker
 ├── requirements.txt    # Python-зависимости
 ├── .env.example        # Пример конфигурации
 └── README.md           # Документация
