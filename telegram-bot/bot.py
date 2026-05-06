@@ -32,6 +32,7 @@ load_dotenv(dotenv_path=env_path)
 
 TELEGRAM_BOT_TOKEN: str = os.environ["TELEGRAM_BOT_TOKEN"]
 AI_MODEL: str = os.getenv("AI_MODEL", "openai-fast")
+AI_FALLBACK_MODEL: str = os.getenv("AI_FALLBACK_MODEL", "openai")
 SYSTEM_PROMPT: str = os.getenv(
     "SYSTEM_PROMPT",
     "Ты — дружелюбный и умный ИИ-ассистент. Отвечай кратко, по делу и на русском языке.",
@@ -48,27 +49,65 @@ logger = logging.getLogger(__name__)
 
 # Хранилище контекста диалогов: chat_id → list[dict]
 chat_histories: dict[int, list[dict[str, str]]] = {}
-MAX_HISTORY = 8
+MAX_HISTORY = 4
+
+
+def ai_models() -> list[str]:
+    """Список моделей для попыток запроса."""
+    models = [AI_MODEL]
+    if AI_FALLBACK_MODEL and AI_FALLBACK_MODEL not in models:
+        models.append(AI_FALLBACK_MODEL)
+    return models
 
 
 def ask_ai(messages: list[dict[str, str]]) -> str:
     """Запрос к бесплатному AI API."""
     started_at = time.monotonic()
-    response = HTTP_SESSION.post(
-        AI_API_URL,
-        json={
-            "model": AI_MODEL,
-            "messages": [{"role": "system", "content": SYSTEM_PROMPT}, *messages],
-            "temperature": 0.7,
-            "max_tokens": 512,
-        },
-        headers={"Content-Type": "application/json", "User-Agent": "telegram-ai-bot"},
-        timeout=60,
-    )
-    response.raise_for_status()
-    data = response.json()
-    logger.info("AI response received in %.2fs", time.monotonic() - started_at)
-    return data["choices"][0]["message"]["content"].strip()
+    last_error: Exception | None = None
+
+    for model in ai_models():
+        for attempt in range(3):
+            try:
+                response = HTTP_SESSION.post(
+                    AI_API_URL,
+                    json={
+                        "model": model,
+                        "messages": [
+                            {"role": "system", "content": SYSTEM_PROMPT},
+                            *messages,
+                        ],
+                        "temperature": 0.7,
+                        "max_tokens": 384,
+                    },
+                    headers={
+                        "Content-Type": "application/json",
+                        "User-Agent": "telegram-ai-bot",
+                    },
+                    timeout=45,
+                )
+                response.raise_for_status()
+                data = response.json()
+                logger.info(
+                    "AI response received in %.2fs via %s",
+                    time.monotonic() - started_at,
+                    model,
+                )
+                return data["choices"][0]["message"]["content"].strip()
+            except requests.RequestException as error:
+                last_error = error
+                status_code = getattr(error.response, "status_code", None)
+                logger.warning(
+                    "AI request failed via %s (attempt %s/3, status=%s): %s",
+                    model,
+                    attempt + 1,
+                    status_code,
+                    error,
+                )
+                if status_code and status_code < 500 and status_code != 429:
+                    break
+                time.sleep(1 + attempt * 2)
+
+    raise RuntimeError("AI provider is temporarily unavailable") from last_error
 
 
 # ─── Обработчики ─────────────────────────────────────────────────────────────
@@ -121,9 +160,14 @@ async def handle_message(update: Update, _) -> None:
         reply = await asyncio.to_thread(ask_ai, history)
     except Exception:
         logger.exception("Ошибка при обращении к AI")
-        reply = "⚠️ Произошла ошибка при обращении к нейросети. Попробуй ещё раз."
+        history.pop()
+        reply = (
+            "Бесплатная нейросеть сейчас перегружена и не ответила после нескольких "
+            "попыток. Напиши ещё раз через 10–20 секунд."
+        )
+    else:
+        history.append({"role": "assistant", "content": reply})
 
-    history.append({"role": "assistant", "content": reply})
     await update.message.reply_text(reply)
 
 
