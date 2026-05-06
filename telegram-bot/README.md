@@ -104,6 +104,45 @@ sudo docker compose down
 
 `restart: unless-stopped` в `docker-compose.yml` автоматически перезапустит бота после сбоя или перезагрузки VPS.
 
+### Автодеплой через GitHub Actions
+
+GitHub не может держать Telegram-бота включённым 24/7 внутри себя, но может автоматически деплоить его на VPS после каждого push в `main`.
+
+Workflow уже добавлен: `.github/workflows/deploy-telegram-bot.yml`.
+
+1. На VPS один раз создай SSH-ключ для GitHub Actions или используй отдельный deploy-key.
+
+2. В GitHub открой:
+
+```text
+Settings → Secrets and variables → Actions → New repository secret
+```
+
+3. Добавь secrets:
+
+| Secret | Что положить |
+|--------|--------------|
+| `VPS_HOST` | IP-адрес VPS |
+| `VPS_USER` | пользователь на VPS, например `ubuntu` |
+| `VPS_SSH_KEY` | приватный SSH-ключ для подключения к VPS |
+| `VPS_PORT` | SSH-порт, обычно `22` (необязательно) |
+| `TELEGRAM_BOT_TOKEN` | токен бота от @BotFather |
+| `GEMINI_API_KEY` | ключ Gemini API |
+
+4. После merge в `main` workflow сам:
+
+- подключится к VPS по SSH;
+- установит Git/Docker, если их нет;
+- скачает или обновит репозиторий;
+- создаст `.env` из GitHub Secrets;
+- запустит `sudo docker compose up -d --build`.
+
+5. Вручную запустить деплой можно на вкладке:
+
+```text
+Actions → Deploy Telegram AI Bot → Run workflow
+```
+
 ## Переменные окружения
 
 | Переменная           | Обязательная | Описание                                           |

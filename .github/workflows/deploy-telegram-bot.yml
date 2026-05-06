@@ -1,0 +1,71 @@
+name: Deploy Telegram AI Bot
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "telegram-bot/**"
+      - ".github/workflows/deploy-telegram-bot.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: telegram-bot-deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Deploy to VPS
+        uses: appleboy/ssh-action@v1.2.2
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          envs: TELEGRAM_BOT_TOKEN,GEMINI_API_KEY
+          script: |
+            set -e
+
+            if ! command -v git >/dev/null 2>&1; then
+              sudo apt update
+              sudo apt install -y git
+            fi
+
+            if ! command -v docker >/dev/null 2>&1; then
+              sudo apt update
+              sudo apt install -y docker.io docker-compose-plugin
+              sudo systemctl enable --now docker
+            fi
+
+            APP_DIR="$HOME/Sueta"
+            REPO_URL="https://github.com/${{ github.repository }}.git"
+
+            if [ ! -d "$APP_DIR/.git" ]; then
+              git clone "$REPO_URL" "$APP_DIR"
+            fi
+
+            cd "$APP_DIR"
+            git fetch origin main
+            git checkout main
+            git pull --ff-only origin main
+
+            cd telegram-bot
+            cat > .env <<EOF
+TELEGRAM_BOT_TOKEN=$TELEGRAM_BOT_TOKEN
+GEMINI_API_KEY=$GEMINI_API_KEY
+GEMINI_MODEL=gemini-2.5-flash
+GEMINI_FALLBACK_MODELS=gemini-2.5-flash-lite,gemini-flash-latest
+AI_MODEL=openai-fast
+AI_FALLBACK_MODEL=openai
+SYSTEM_PROMPT=Ты — дружелюбный и умный ИИ-ассистент. Отвечай кратко, по делу и на русском языке.
+EOF
+
+            sudo docker compose up -d --build
+            sudo docker image prune -f
