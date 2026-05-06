@@ -22,3 +22,9 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Telegram bot
+telegram-bot/.env
+telegram-bot/venv/
+__pycache__/
+*.pyc
