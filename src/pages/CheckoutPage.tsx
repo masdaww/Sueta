@@ -226,7 +226,7 @@ export function CheckoutPage() {
                   bgColor={i.product.bgColor}
                   bgColor2={i.product.bgColor2}
                   size="sm"
-                  className="h-14 w-14"
+                  className="h-14 w-14 flex-none"
                 />
                 <div className="flex-1 min-w-0">
                   <div className="text-sm font-medium text-ink-900 line-clamp-2">{i.product.title}</div>

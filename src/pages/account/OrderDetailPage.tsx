@@ -136,9 +136,13 @@ export function OrderDetailPage() {
             <div className="space-y-3">
               {order.items.map((it, i) => (
                 <div key={i} className="flex items-center gap-3">
-                  <div className="h-14 w-14">
-                    <ProductImage emoji={it.emojiSnapshot} bgColor="#fff5d9" bgColor2="#ffd23a" size="sm" className="h-14 w-14" />
-                  </div>
+                  <ProductImage
+                    emoji={it.emojiSnapshot}
+                    bgColor="#fff5d9"
+                    bgColor2="#ffd23a"
+                    size="sm"
+                    className="h-14 w-14 flex-none"
+                  />
                   <div className="flex-1 min-w-0">
                     <Link to={`/product/${it.productId}`} className="font-medium text-ink-900 hover:text-ozor-600 line-clamp-2">{it.titleSnapshot}</Link>
                     <div className="text-xs text-ink-500">× {it.quantity}</div>

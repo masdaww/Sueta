@@ -90,13 +90,19 @@ export function AdminProductsPage() {
                   const cat = categories.find((c) => c.id === p.categoryId);
                   return (
                     <tr key={p.id} className="hover:bg-ink-50">
-                      <td className="py-2 pr-3 flex items-center gap-3">
-                        <div className="h-12 w-12">
-                          <ProductImage emoji={p.emoji} bgColor={p.bgColor} bgColor2={p.bgColor2} size="sm" className="h-12 w-12" />
-                        </div>
-                        <div className="min-w-0">
-                          <div className="font-medium text-ink-900 line-clamp-1">{p.title}</div>
-                          <div className="text-xs text-ink-500">{p.brand}</div>
+                      <td className="py-2 pr-3">
+                        <div className="flex items-center gap-3">
+                          <ProductImage
+                            emoji={p.emoji}
+                            bgColor={p.bgColor}
+                            bgColor2={p.bgColor2}
+                            size="sm"
+                            className="h-12 w-12 flex-none"
+                          />
+                          <div className="min-w-0">
+                            <div className="font-medium text-ink-900 line-clamp-1">{p.title}</div>
+                            <div className="text-xs text-ink-500">{p.brand}</div>
+                          </div>
                         </div>
                       </td>
                       <td className="py-2 px-3 hidden sm:table-cell">{cat ? `${cat.emoji} ${cat.name}` : "—"}</td>
