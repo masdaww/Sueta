@@ -24,7 +24,7 @@ export function ProductImage({
   parodyLabel,
 }: ProductImageProps) {
   const sizes: Record<string, string> = {
-    sm: "h-20 w-20 text-3xl",
+    sm: "text-3xl",
     md: "h-40 w-full text-6xl",
     lg: "h-56 w-full text-7xl",
     xl: "h-72 w-full text-8xl",
