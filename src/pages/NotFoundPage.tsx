@@ -1,14 +1,14 @@
-import { Link } from 'react-router-dom'
+import { Link } from "react-router-dom";
 
-export default function NotFoundPage() {
+export function NotFoundPage() {
   return (
-    <div className="mx-auto max-w-3xl px-4 py-16 text-center">
-      <div className="text-6xl">🤷‍♂️</div>
-      <h1 className="mt-3 text-3xl font-extrabold text-slate-900">404 — потерялись в суете</h1>
-      <p className="mt-2 text-slate-500">Эта страница убежала в отпуск. Возможно, в Геленджик.</p>
-      <div className="mt-5">
-        <Link to="/" className="btn-primary">На главную</Link>
-      </div>
+    <div className="container mx-auto px-4 py-20 text-center">
+      <div className="text-7xl mb-4">🦝</div>
+      <h1 className="text-3xl font-extrabold text-ink-900">Страница исчезла</h1>
+      <p className="text-ink-500 mt-2">Енот точно её не съел. Но проверьте URL ещё раз.</p>
+      <Link to="/" className="ozor-btn-primary inline-flex mt-6 px-4 py-2.5">
+        Вернуться домой
+      </Link>
     </div>
-  )
+  );
 }

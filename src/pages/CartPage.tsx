@@ -1,156 +1,245 @@
-import { Link } from 'react-router-dom'
-import { useCart } from '@/store/cart'
-import { useCatalog } from '@/store/catalog'
-import { formatPrice, pluralizeRu } from '@/lib/format'
-import { EmptyState } from '@/components/EmptyState'
-import { confirm } from '@/components/confirm'
-import { notify } from '@/store/notify'
+import { useEffect, useMemo, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import { Minus, Plus, ShoppingBag, Trash2 } from "lucide-react";
+import { ConfirmDialog } from "../components/ui/ConfirmDialog";
+import { EmptyState } from "../components/ui/EmptyState";
+import { ProductImage } from "../components/product/ProductImage";
+import { Skeleton } from "../components/ui/Skeleton";
+import type { Product } from "../types";
+import { applyPromo, listProducts } from "../api/mockApi";
+import { useApp } from "../store/AppContext";
+import { formatPrice } from "../lib/format";
 
-export default function CartPage() {
-  const items = useCart((s) => s.items)
-  const inc = useCart((s) => s.inc)
-  const dec = useCart((s) => s.dec)
-  const setQty = useCart((s) => s.setQty)
-  const remove = useCart((s) => s.remove)
-  const clear = useCart((s) => s.clear)
+export function CartPage() {
+  const { cart, setCartQty, removeFromCart, clearCart, pushToast } = useApp();
+  const [products, setProducts] = useState<Product[] | null>(null);
+  const [confirmClear, setConfirmClear] = useState(false);
+  const [confirmRemove, setConfirmRemove] = useState<Product | null>(null);
+  const [promo, setPromo] = useState("");
+  const [appliedPromo, setAppliedPromo] = useState<{ code: string; discount: number } | null>(null);
+  const navigate = useNavigate();
 
-  const products = useCatalog((s) => s.products)
+  useEffect(() => {
+    let alive = true;
+    listProducts({ pageSize: 1000 }).then((res) => {
+      if (alive) setProducts(res.items);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
 
-  const detailed = items
-    .map((i) => ({ ...i, product: products.find((p) => p.id === i.productId) }))
-    .filter((i) => i.product)
+  const items = useMemo(() => {
+    if (!products) return [];
+    return cart
+      .map((c) => {
+        const p = products.find((p) => p.id === c.productId);
+        if (!p) return null;
+        return { product: p, quantity: c.quantity };
+      })
+      .filter((x): x is { product: Product; quantity: number } => x !== null);
+  }, [cart, products]);
 
-  const total = detailed.reduce((acc, i) => acc + (i.product!.price * i.qty), 0)
-  const totalOld = detailed.reduce(
-    (acc, i) => acc + ((i.product!.oldPrice ?? i.product!.price) * i.qty),
-    0,
-  )
-  const saved = Math.max(0, totalOld - total)
-  const totalCount = detailed.reduce((a, i) => a + i.qty, 0)
+  const subtotal = items.reduce((s, i) => s + i.product.price * i.quantity, 0);
+  const discount = appliedPromo ? Math.round((subtotal * appliedPromo.discount) / 100) : 0;
+  const delivery = subtotal === 0 ? 0 : subtotal >= 1999 ? 0 : 199;
+  const total = Math.max(0, subtotal - discount) + delivery;
 
-  if (detailed.length === 0) {
+  const onApplyPromo = async () => {
+    if (!promo.trim()) return;
+    const res = await applyPromo(promo);
+    if (res.valid) {
+      setAppliedPromo({ code: promo.toUpperCase(), discount: res.discountPct });
+      pushToast({
+        type: "success",
+        title: `Промокод применён: -${res.discountPct}%`,
+        description: "Озор одобряет.",
+      });
+    } else {
+      pushToast({ type: "warning", title: "Не сработало", description: res.reason ?? "Попробуйте другой код." });
+    }
+  };
+
+  if (products === null) {
     return (
-      <div className="mx-auto max-w-3xl px-4 py-10">
+      <div className="container mx-auto px-4 py-6">
+        <Skeleton className="h-10 w-1/3 mb-4" />
+        <div className="grid lg:grid-cols-[1fr_360px] gap-6">
+          <div className="space-y-3">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <Skeleton key={i} className="h-28" />
+            ))}
+          </div>
+          <Skeleton className="h-64" />
+        </div>
+      </div>
+    );
+  }
+
+  if (items.length === 0) {
+    return (
+      <div className="container mx-auto px-4 py-12">
         <EmptyState
           emoji="🛒"
-          title="Корзина пуста"
-          description="Кажется, вы держитесь молодцом. Но у нас есть пара суетных предложений."
-          action={<Link to="/c" className="btn-primary">Перейти в каталог</Link>}
+          title="Корзина пустует"
+          description="Енот заглядывал — никого не нашёл. Самое время добавить чего-нибудь нелепого."
+          action={
+            <Link to="/catalog" className="ozor-btn-primary px-4 py-2">
+              Перейти в каталог
+            </Link>
+          }
         />
       </div>
-    )
+    );
   }
 
   return (
-    <div className="mx-auto max-w-7xl px-4 py-6">
-      <div className="flex items-end justify-between gap-3">
-        <h1 className="text-2xl font-bold text-slate-900 sm:text-3xl">Корзина</h1>
-        <button
-          className="btn-ghost text-rose-600 hover:!bg-rose-50"
-          onClick={async () => {
-            if (
-              await confirm({
-                title: 'Очистить корзину?',
-                message: 'Все товары будут удалены. Это нельзя отменить (но можно расстроиться).',
-                confirmText: 'Очистить',
-                danger: true,
-              })
-            ) {
-              clear()
-              notify.info('Корзина очищена')
-            }
-          }}
-        >
-          Очистить
+    <div className="container mx-auto px-4 py-6">
+      <div className="flex items-end justify-between gap-3 mb-5">
+        <h1 className="ozor-section-title flex items-center gap-2">
+          <ShoppingBag className="text-ozor-500" size={28} /> Корзина
+        </h1>
+        <button onClick={() => setConfirmClear(true)} className="ozor-btn-ghost px-3 py-2 text-sm">
+          <Trash2 size={14} /> Очистить
         </button>
       </div>
-      <p className="mt-1 text-sm text-slate-500">
-        {totalCount} {pluralizeRu(totalCount, ['товар', 'товара', 'товаров'])} на сумму {formatPrice(total)}
-      </p>
-
-      <div className="mt-6 grid gap-6 lg:grid-cols-[1fr_360px]">
+      <div className="grid lg:grid-cols-[1fr_360px] gap-6 items-start">
         <div className="space-y-3">
-          {detailed.map(({ product, qty }) => (
-            <div key={product!.id} className="card flex gap-3 p-3 sm:p-4">
-              <Link to={`/p/${product!.id}`} className="block h-24 w-24 shrink-0 overflow-hidden rounded-lg bg-slate-50 sm:h-28 sm:w-28">
-                <img src={product!.image} alt={product!.title} className="h-full w-full object-cover" />
+          {items.map(({ product, quantity }) => (
+            <div key={product.id} className="ozor-card p-3 flex gap-3">
+              <Link to={`/product/${product.id}`} className="flex-none w-28">
+                <ProductImage
+                  emoji={product.emoji}
+                  bgColor={product.bgColor}
+                  bgColor2={product.bgColor2}
+                  size="sm"
+                  className="h-28 w-28"
+                />
               </Link>
-              <div className="flex flex-1 flex-col gap-2">
-                <div className="flex items-start justify-between gap-2">
-                  <Link to={`/p/${product!.id}`} className="line-clamp-2 text-sm font-medium text-slate-900 hover:text-sueta-700">
-                    {product!.title}
-                  </Link>
+              <div className="flex-1 min-w-0">
+                <Link to={`/product/${product.id}`} className="font-semibold text-ink-900 hover:text-ozor-600 line-clamp-2">
+                  {product.title}
+                </Link>
+                <div className="text-xs text-ink-500 mt-1">Бренд: {product.brand}</div>
+                <div className="mt-2 flex flex-wrap gap-3 items-center justify-between">
+                  <div className="inline-flex items-center bg-ink-100 rounded-xl">
+                    <button
+                      onClick={() => setCartQty(product.id, Math.max(1, quantity - 1))}
+                      className="p-1.5 text-ink-700"
+                      aria-label="Уменьшить"
+                    >
+                      <Minus size={14} />
+                    </button>
+                    <span className="px-2 font-semibold text-ink-900 min-w-[2rem] text-center">{quantity}</span>
+                    <button
+                      onClick={() => setCartQty(product.id, Math.min(product.inStock || 99, quantity + 1))}
+                      className="p-1.5 text-ink-700"
+                      aria-label="Увеличить"
+                    >
+                      <Plus size={14} />
+                    </button>
+                  </div>
+                  <div className="text-lg font-extrabold text-ink-900 ml-auto">
+                    {formatPrice(product.price * quantity)}
+                  </div>
                   <button
-                    className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-rose-600"
+                    onClick={() => setConfirmRemove(product)}
+                    className="text-ink-500 hover:text-red-500 p-2 rounded-lg hover:bg-red-50"
                     aria-label="Удалить"
-                    onClick={() => {
-                      remove(product!.id)
-                      notify.info('Удалено из корзины', product!.title)
-                    }}
                   >
-                    🗑
+                    <Trash2 size={16} />
                   </button>
-                </div>
-                <div className="text-xs text-slate-500">{product!.brand}</div>
-                <div className="mt-auto flex items-center justify-between gap-2">
-                  <div className="inline-flex items-center rounded-lg ring-1 ring-slate-200">
-                    <button
-                      className="grid h-9 w-9 place-items-center text-lg text-slate-600 hover:bg-slate-50"
-                      onClick={() => dec(product!.id)}
-                      aria-label="Меньше"
-                    >−</button>
-                    <input
-                      type="number"
-                      min={1}
-                      value={qty}
-                      onChange={(e) => setQty(product!.id, Math.max(1, Number(e.target.value) || 1))}
-                      className="h-9 w-12 border-0 bg-transparent text-center text-sm focus:outline-none"
-                    />
-                    <button
-                      className="grid h-9 w-9 place-items-center text-lg text-slate-600 hover:bg-slate-50"
-                      onClick={() => inc(product!.id)}
-                      aria-label="Больше"
-                    >+</button>
-                  </div>
-                  <div className="text-right">
-                    <div className="text-base font-bold text-slate-900">{formatPrice(product!.price * qty)}</div>
-                    {product!.oldPrice && (
-                      <div className="text-xs text-slate-400 line-through">
-                        {formatPrice(product!.oldPrice * qty)}
-                      </div>
-                    )}
-                  </div>
                 </div>
               </div>
             </div>
           ))}
         </div>
+        <aside className="ozor-card p-5 sticky top-[calc(var(--header-h)+8px)]">
+          <div className="font-semibold text-ink-900 text-lg mb-3">Итого</div>
+          <div className="space-y-2 text-sm">
+            <Row label={`Товары (${items.reduce((s, i) => s + i.quantity, 0)})`} value={formatPrice(subtotal)} />
+            <Row label={`Скидка${appliedPromo ? ` (${appliedPromo.code})` : ""}`} value={appliedPromo ? `-${formatPrice(discount)}` : "—"} muted={!appliedPromo} />
+            <Row
+              label="Доставка"
+              value={delivery === 0 ? "Бесплатно" : formatPrice(delivery)}
+              hint={subtotal < 1999 ? "Бесплатно от 1 999 ₽" : undefined}
+            />
+          </div>
+          <div className="border-t border-ink-100 my-3" />
+          <div className="flex items-baseline justify-between">
+            <span className="font-semibold">К оплате</span>
+            <span className="text-2xl font-extrabold text-ink-900">{formatPrice(total)}</span>
+          </div>
 
-        <aside className="space-y-3">
-          <div className="card sticky top-24 space-y-3 p-4">
-            <h2 className="text-lg font-semibold text-slate-900">Итого</h2>
-            <div className="flex justify-between text-sm text-slate-600">
-              <span>Товары</span>
-              <span>{formatPrice(totalOld)}</span>
-            </div>
-            {saved > 0 && (
-              <div className="flex justify-between text-sm text-emerald-700">
-                <span>Скидка</span>
-                <span>−{formatPrice(saved)}</span>
+          <div className="mt-4">
+            {appliedPromo ? (
+              <div className="flex items-center justify-between rounded-xl bg-emerald-50 text-emerald-800 px-3 py-2 text-sm">
+                <span>Промокод: <b>{appliedPromo.code}</b> (−{appliedPromo.discount}%)</span>
+                <button onClick={() => setAppliedPromo(null)} className="text-emerald-700 hover:underline">Убрать</button>
+              </div>
+            ) : (
+              <div className="flex gap-2">
+                <input
+                  className="ozor-input"
+                  placeholder="Промокод (напр. ОЗОР10)"
+                  value={promo}
+                  onChange={(e) => setPromo(e.target.value)}
+                />
+                <button onClick={onApplyPromo} className="ozor-btn-secondary px-3 py-2 text-sm">
+                  Применить
+                </button>
               </div>
             )}
-            <div className="flex items-baseline justify-between border-t border-slate-100 pt-3">
-              <span className="text-sm text-slate-600">К оплате</span>
-              <span className="text-2xl font-extrabold text-slate-900">{formatPrice(total)}</span>
-            </div>
-            <Link to="/checkout" className="btn-primary w-full justify-center">Оформить заказ</Link>
-            <Link to="/c" className="btn-ghost w-full justify-center">Продолжить покупки</Link>
-            <p className="text-xs text-slate-400">
-              Это пародия. Реальные деньги никуда не денутся (потому что и не возьмутся).
-            </p>
           </div>
+
+          <button
+            onClick={() => navigate("/checkout", { state: { promo: appliedPromo } })}
+            className="ozor-btn-primary w-full mt-4 py-3"
+          >
+            Оформить заказ
+          </button>
+          <Link to="/catalog" className="block text-center mt-3 text-sm text-ink-500 hover:text-ozor-600">
+            ← Продолжить покупки
+          </Link>
         </aside>
       </div>
+
+      <ConfirmDialog
+        open={confirmClear}
+        onClose={() => setConfirmClear(false)}
+        onConfirm={() => {
+          clearCart();
+          setAppliedPromo(null);
+          pushToast({ type: "info", title: "Корзина очищена", description: "Енот вздохнул облегчённо." });
+        }}
+        title="Очистить корзину?"
+        description="Все товары исчезнут отсюда. Их можно будет добавить заново."
+        confirmLabel="Да, очистить"
+        destructive
+      />
+      <ConfirmDialog
+        open={!!confirmRemove}
+        onClose={() => setConfirmRemove(null)}
+        onConfirm={() => {
+          if (confirmRemove) removeFromCart(confirmRemove.id);
+        }}
+        title={`Удалить «${confirmRemove?.title ?? ""}»?`}
+        description="Можно будет вернуть из избранного, если понадобится."
+        confirmLabel="Удалить"
+        destructive
+      />
     </div>
-  )
+  );
+}
+
+function Row({ label, value, hint, muted }: { label: string; value: string; hint?: string; muted?: boolean }) {
+  return (
+    <div className="flex items-baseline justify-between gap-2">
+      <span className="text-ink-600">
+        {label}
+        {hint && <span className="block text-xs text-ink-400 mt-0.5">{hint}</span>}
+      </span>
+      <span className={muted ? "text-ink-400" : "text-ink-900 font-medium"}>{value}</span>
+    </div>
+  );
 }
