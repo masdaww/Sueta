@@ -34,8 +34,10 @@ function DemoSeed() {
 }
 
 export default function App() {
+  // Strip trailing slash so BrowserRouter accepts e.g. "/Sueta" instead of "/Sueta/".
+  const basename = import.meta.env.BASE_URL.replace(/\/$/, "");
   return (
-    <BrowserRouter>
+    <BrowserRouter basename={basename || "/"}>
       <AppProvider>
         <DemoSeed />
         <Layout>
